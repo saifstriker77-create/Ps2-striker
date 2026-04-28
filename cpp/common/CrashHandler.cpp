@@ -354,6 +354,126 @@ void CrashHandler::WriteDumpForCaller()
 	LogCallstack(0, nullptr);
 }
 
+#elif defined(__APPLE__)
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/ucontext.h>
+#include <unistd.h>
+#include <cstring>
+#include "pcsx2/Config.h"
+
+namespace CrashHandler
+{
+	static constexpr size_t CrashReportPathSize = 1024;
+	static char s_crash_report_path[CrashReportPathSize] = {};
+	static bool s_crash_report_path_ready = false;
+	static bool s_in_apple_signal_handler = false;
+
+	static const char* GetAppleSignalName(int signal_no)
+	{
+		switch (signal_no)
+		{
+			case SIGSEGV: return "SIGSEGV";
+			case SIGBUS: return "SIGBUS";
+			case SIGILL: return "SIGILL";
+			default: return "UNKNOWN";
+		}
+	}
+
+	static void SetCrashReportPath(std::string_view logs_directory)
+	{
+		if (logs_directory.empty())
+			return;
+
+		const std::string path = Path::Combine(logs_directory, "crash_report.txt");
+		if (path.size() < CrashReportPathSize)
+		{
+			std::memcpy(s_crash_report_path, path.c_str(), path.size() + 1);
+			s_crash_report_path_ready = true;
+		}
+	}
+
+	static void WriteAppleCrashReport(int signal, siginfo_t* siginfo, void* ctx)
+	{
+		const char* report_path = s_crash_report_path_ready ? s_crash_report_path : nullptr;
+		char local_report_path[CrashReportPathSize] = {};
+		if (!report_path)
+		{
+			const char* logs_dir = EmuFolders::Logs.c_str();
+			if (!logs_dir || *logs_dir == '\0')
+				return;
+
+			int path_len = std::snprintf(local_report_path, sizeof(local_report_path), "%s/%s", logs_dir, "crash_report.txt");
+			if (path_len <= 0 || static_cast<size_t>(path_len) >= sizeof(local_report_path))
+				return;
+
+			report_path = local_report_path;
+		}
+
+		void* exception_pc = nullptr;
+#if defined(__aarch64__) || defined(__arm64__)
+		exception_pc = reinterpret_cast<void*>(static_cast<ucontext_t*>(ctx)->uc_mcontext->__ss.__pc);
+#elif defined(__x86_64__)
+		exception_pc = reinterpret_cast<void*>(static_cast<ucontext_t*>(ctx)->uc_mcontext->__ss.__rip);
+#else
+		exception_pc = nullptr;
+#endif
+
+		const void* fault_address = siginfo ? siginfo->si_addr : nullptr;
+		time_t timestamp = time(nullptr);
+
+		char report[512];
+		int written = std::snprintf(report, sizeof(report),
+			"Signal: %s\n"
+			"Fault address: %p\n"
+			"Program counter: %p\n"
+			"Timestamp: %lld\n",
+			GetAppleSignalName(signal), fault_address, exception_pc,
+			static_cast<long long>(timestamp));
+		if (written <= 0)
+			return;
+
+		int fd = open(report_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+		if (fd < 0)
+			return;
+
+		ssize_t result = write(fd, report, static_cast<size_t>(written));
+		(void)result;
+		close(fd);
+	}
+} // namespace CrashHandler
+
+bool CrashHandler::Install()
+{
+	SetCrashReportPath(EmuFolders::Logs);
+	return true;
+}
+
+void CrashHandler::SetWriteDirectory(std::string_view dump_directory)
+{
+	CrashHandler::SetCrashReportPath(dump_directory);
+}
+
+void CrashHandler::WriteDumpForCaller()
+{
+	CrashHandler::WriteAppleCrashReport(0, nullptr, nullptr);
+}
+
+void CrashHandler::CrashSignalHandler(int signal, siginfo_t* siginfo, void* ctx)
+{
+	if (!CrashHandler::s_in_apple_signal_handler)
+	{
+		CrashHandler::s_in_apple_signal_handler = true;
+		CrashHandler::WriteAppleCrashReport(signal, siginfo, ctx);
+		CrashHandler::s_in_apple_signal_handler = false;
+	}
+
+	static const char abort_message[] = "Aborting application.\n";
+	write(STDERR_FILENO, abort_message, sizeof(abort_message) - 1);
+	std::abort();
+}
+
 #else
 
 bool CrashHandler::Install()
