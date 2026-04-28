@@ -3041,7 +3041,7 @@ static void iBranchTest(u32 newpc)
         // xCMOVS(eax, ptr32[&cpuRegs.cycle]); // if next < cycle (signed), mov cycle to eax. 
         // So eax becomes max(nextEventCycle, cycle). Wait, if next < cycle, taking cycle ensures we don't rewind.
         // If next >= cycle, we take next. So we advance TO nextEventCycle.
-        armAsm->Csel(EAX, EEX, EAX, a64::Condition::mi);
+        armAsm->Csel(EAX, EEX, EAX, a64::Condition::pl);
         
         armStore(PTR_CPU(cpuRegs.cycle), EAX);
 
