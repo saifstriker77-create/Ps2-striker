@@ -5,6 +5,7 @@
 #include "CrashHandler.h"
 #include "DynamicLibrary.h"
 #include "FileSystem.h"
+#include "Path.h"
 #include "StringUtil.h"
 #include <cinttypes>
 #include <cstdio>
