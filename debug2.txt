@@ -1,0 +1,88 @@
+=== recCpu ===
+./cpp/pcsx2/R5900.h:extern R5900cpu recCpu;
+./cpp/pcsx2/arm64/RecStubs.cpp:R5900cpu recCpu;
+./cpp/pcsx2/arm64/RecStubs.cpp:        recCpu.Reserve = Stub_Reserve;
+./cpp/pcsx2/arm64/RecStubs.cpp:        recCpu.Reset = Stub_Reset;
+./cpp/pcsx2/arm64/RecStubs.cpp:        // [iPSX2] Diagnostic Hook for recCpu.Execute
+./cpp/pcsx2/arm64/RecStubs.cpp:            recCpu.Execute = []() {
+./cpp/pcsx2/arm64/RecStubs.cpp:            recCpu.Execute = [](){}; // Void function
+./cpp/pcsx2/VMManager.cpp:	recCpu.Reserve();
+./cpp/pcsx2/VMManager.cpp:	recCpu.Shutdown();
+./cpp/pcsx2/VMManager.cpp:    Console.WriteLn("@@DEBUG@@ recCpu=%p func=%p intCpu=%p func=%p", &recCpu, (void*)recCpu.Execute, &intCpu, (void*)intCpu.Execute);
+./cpp/pcsx2/VMManager.cpp:        Console.WriteLn("@@EE_SEL_PATH@@ path=\"JIT_FORCED\" chosen=recCpu (iPSX2_FORCE_JIT=1)");
+./cpp/pcsx2/VMManager.cpp:             if (!std::exchange(s_path_rec, true)) Console.WriteLn("@@EE_SEL_PATH@@ path=\"REC\" chosen=recCpu");
+./cpp/pcsx2/VMManager.cpp:             Cpu = &recCpu;
+./cpp/pcsx2/VMManager.cpp:                 if (!std::exchange(s_path_rec_else, true)) Console.WriteLn("@@EE_SEL_PATH@@ path=\"REC\" chosen=recCpu");
+./cpp/pcsx2/VMManager.cpp:                 Cpu = &recCpu;
+./cpp/pcsx2/VMManager.cpp:			Cpu    = ee_jit  ? &recCpu : &intCpu;
+./cpp/pcsx2/VMManager.cpp:		const char* ee_mode = (Cpu == &recCpu) ? "Recompiler(recCpu)" : 
+./cpp/pcsx2/VMManager.cpp:		Console.WriteLn("@@IOP_CORE_ADDRS@@ Cpu=%p intCpu=%p recCpu=%p psxCpu=%p psxRec=%p psxInt=%p", 
+./cpp/pcsx2/VMManager.cpp:			Cpu, &intCpu, &recCpu, psxCpu, &psxRec, &psxInt);
+./cpp/pcsx2/Config.h:		// CPU core selection: 0=Translator (recCpu), 1=Interpreter (intCpu), 2=ARM64 Dynarec (jitA64Cpu, if available)
+./cpp/pcsx2/x86/ix86-32/iR5900.cpp:R5900cpu recCpu = {
+./debug2.txt:=== recCpu ===
+./debug.txt:./cpp/pcsx2/R5900.h:extern R5900cpu recCpu;
+./debug.txt:./cpp/pcsx2/arm64/RecStubs.cpp:R5900cpu recCpu;
+=== jitA64Cpu ===
+./cpp/pcsx2/R5900.h:extern R5900cpu jitA64Cpu;
+./cpp/pcsx2/VMManager.cpp:	jitA64Cpu.Reserve();
+./cpp/pcsx2/VMManager.cpp:	jitA64Cpu.Shutdown();
+./cpp/pcsx2/VMManager.cpp:             if (!std::exchange(s_path_jit, true)) Console.WriteLn("@@EE_SEL_PATH@@ path=\"ARM64\" chosen=jitA64Cpu");
+./cpp/pcsx2/VMManager.cpp:             Cpu = &jitA64Cpu;
+./cpp/pcsx2/VMManager.cpp:		if (Cpu == &jitA64Cpu) ee_mode = "Recompiler(jitA64Cpu)";
+./cpp/pcsx2/Config.h:		// CPU core selection: 0=Translator (recCpu), 1=Interpreter (intCpu), 2=ARM64 Dynarec (jitA64Cpu, if available)
+./debug2.txt:./cpp/pcsx2/Config.h:		// CPU core selection: 0=Translator (recCpu), 1=Interpreter (intCpu), 2=ARM64 Dynarec (jitA64Cpu, if available)
+./debug2.txt:=== jitA64Cpu ===
+./.claude/settings.local.json:      "Bash(grep -v \"extern\\\\|\\\\\\\\&jitA64Cpu\\\\|Cpu == &jitA64Cpu\\\\|jitA64Cpu\\\\\\\\.\")"
+./debug.txt:./cpp/pcsx2/R5900.h:extern R5900cpu jitA64Cpu;
+=== Cpu Assignment ===
+./cpp/pcsx2/R5900.cpp:R5900cpu *Cpu = NULL;
+./cpp/pcsx2/VMManager.cpp:        Cpu = &GSDumpReplayerCpu;
+./cpp/pcsx2/VMManager.cpp:        psxCpu = &psxInt;
+./cpp/pcsx2/VMManager.cpp:        Cpu = &intCpu;
+./cpp/pcsx2/VMManager.cpp:        Cpu = &intCpu;
+./cpp/pcsx2/VMManager.cpp:        Cpu = &intCpu;
+./cpp/pcsx2/VMManager.cpp:             Cpu = &jitA64Cpu;
+./cpp/pcsx2/VMManager.cpp:             Cpu = &recCpu;
+./cpp/pcsx2/VMManager.cpp:                 Cpu = &recCpu;
+./cpp/pcsx2/VMManager.cpp:        if (Cpu == &intCpu && iop_ct != 0) {
+./cpp/pcsx2/VMManager.cpp:            psxCpu = &psxInt;
+./cpp/pcsx2/VMManager.cpp:            psxCpu = &psxRec;
+./cpp/pcsx2/VMManager.cpp:            psxCpu = &psxInt;
+./cpp/pcsx2/VMManager.cpp:            psxCpu = EmuConfig.Cpu.Recompiler.EnableIOP ? &psxRec : &psxInt;
+./cpp/pcsx2/VMManager.cpp:			psxCpu = iop_jit ? &psxRec : &psxInt;
+./cpp/pcsx2/VMManager.cpp://	Cpu = &intCpu;
+./cpp/pcsx2/VMManager.cpp://	psxCpu = &psxInt;
+./cpp/pcsx2/VMManager.cpp:		const char* ee_mode = (Cpu == &recCpu) ? "Recompiler(recCpu)" : 
+./cpp/pcsx2/VMManager.cpp:							 (Cpu == &intCpu) ? "Interpreter(intCpu)" : 
+./cpp/pcsx2/VMManager.cpp:		if (Cpu == &jitA64Cpu) ee_mode = "Recompiler(jitA64Cpu)";
+./cpp/pcsx2/VMManager.cpp:		const char* iop_mode = (psxCpu == &psxRec) ? "Recompiler" : 
+./cpp/pcsx2/VMManager.cpp:							  (psxCpu == &psxInt) ? "Interpreter" : "Unknown";
+./cpp/pcsx2/VMManager.cpp:	if (EmuConfig.Cpu == old_config.Cpu && EmuConfig.Gamefixes == old_config.Gamefixes &&
+./cpp/pcsx2/vtlb.cpp.android.try:	if (Cpu == &intCpu)
+./cpp/pcsx2/ImGui/ImGuiOverlays.cpp:			const char* ee_mode  = (Cpu == &intCpu) ? "Int" : "JIT";
+./cpp/pcsx2/ImGui/ImGuiOverlays.cpp:			const char* iop_mode = (psxCpu == &psxInt) ? "Int" : "JIT";
+./cpp/pcsx2/GSDumpReplayer.cpp:R5900cpu GSDumpReplayerCpu = {
+./cpp/pcsx2/GSDumpReplayer.cpp:	Cpu = &GSDumpReplayerCpu;
+./cpp/pcsx2/GSDumpReplayer.cpp:	psxCpu = &psxInt;
+./cpp/pcsx2/GSDumpReplayer.cpp:	Cpu = nullptr;
+./cpp/pcsx2/GSDumpReplayer.cpp:	psxCpu = nullptr;
+./cpp/pcsx2/Pcsx2Config.cpp:    g_cpuRegistersPack.Cpu = *this;
+./cpp/pcsx2/Interpreter.cpp:		if (Cpu == &intCpu)
+./cpp/pcsx2/Interpreter.cpp:	if( Cpu == &intCpu )
+./cpp/pcsx2/Interpreter.cpp:R5900cpu intCpu =
+./cpp/pcsx2/vtlb.cpp:	if (Cpu == &intCpu)
+./cpp/pcsx2/x86/ix86-32/iR5900.cpp:R5900cpu recCpu = {
+./debug2.txt:=== recCpu ===
+./debug2.txt:./cpp/pcsx2/VMManager.cpp:             Cpu = &recCpu;
+./debug2.txt:./cpp/pcsx2/VMManager.cpp:                 Cpu = &recCpu;
+./debug2.txt:./cpp/pcsx2/VMManager.cpp:		const char* ee_mode = (Cpu == &recCpu) ? "Recompiler(recCpu)" : 
+./debug2.txt:./cpp/pcsx2/x86/ix86-32/iR5900.cpp:R5900cpu recCpu = {
+./debug2.txt:./debug2.txt:=== recCpu ===
+./debug2.txt:=== jitA64Cpu ===
+./debug2.txt:./cpp/pcsx2/VMManager.cpp:             Cpu = &jitA64Cpu;
+./debug2.txt:./cpp/pcsx2/VMManager.cpp:		if (Cpu == &jitA64Cpu) ee_mode = "Recompiler(jitA64Cpu)";
+./debug2.txt:./debug2.txt:=== jitA64Cpu ===
+./debug2.txt:./.claude/settings.local.json:      "Bash(grep -v \"extern\\\\|\\\\\\\\&jitA64Cpu\\\\|Cpu == &jitA64Cpu\\\\|jitA64Cpu\\\\\\\\.\")"
+./.claude/settings.local.json:      "Bash(grep -v \"extern\\\\|\\\\\\\\&jitA64Cpu\\\\|Cpu == &jitA64Cpu\\\\|jitA64Cpu\\\\\\\\.\")"
+./debug.txt:./cpp/pcsx2/R5900.cpp:R5900cpu *Cpu = NULL;

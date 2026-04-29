@@ -1,0 +1,81 @@
+./cpp/pcsx2/R5900.cpp
+./cpp/pcsx2/R5900Def.h
+./cpp/pcsx2/R5900.h
+./cpp/pcsx2/R5900OpcodeTables.h
+./cpp/pcsx2/DebugTools/DisR5900asm.cpp
+./cpp/pcsx2/R5900OpcodeTables.cpp
+./cpp/pcsx2/R5900OpcodeImpl.cpp
+./cpp/pcsx2/x86/R5900_Profiler.h
+./cpp/pcsx2/x86/iR5900Analysis.h
+./cpp/pcsx2/x86/iR5900Move.h
+./cpp/pcsx2/x86/iR5900Arit.h
+./cpp/pcsx2/x86/iR5900Analysis.cpp
+./cpp/pcsx2/x86/iR5900.h
+./cpp/pcsx2/x86/iR5900Jump.h
+./cpp/pcsx2/x86/iR5900MultDiv.h
+./cpp/pcsx2/x86/iR5900LoadStore.h
+./cpp/pcsx2/x86/ix86-32/iR5900Branch.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900Arit.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900MultDiv.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900Shift.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900Move.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900Jump.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900Templates.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900LoadStore.cpp
+./cpp/pcsx2/x86/ix86-32/iR5900AritImm.cpp
+./cpp/pcsx2/x86/iR5900Branch.h
+./cpp/pcsx2/x86/iR5900Misc.cpp
+./cpp/pcsx2/x86/iR5900Shift.h
+./cpp/pcsx2/x86/iR5900AritImm.h
+./cpp/3rdparty/zstd/zstd/tests/DEPRECATED-test-zstd-speed.py
+./cpp/pcsx2/R5900.cpp:#include "R5900.h"
+./cpp/pcsx2/R5900.cpp:#include "x86/iR5900.h"
+./cpp/pcsx2/R5900.cpp:#include "R5900OpcodeTables.h"
+./cpp/pcsx2/R5900.cpp:using namespace R5900;	// for R5900 disasm tools
+./cpp/pcsx2/R5900.cpp:R5900cpu *Cpu = NULL;
+./cpp/pcsx2/R5900.cpp:	cpuRegs.CP0.n.PRid		= 0x00002e20; // PRevID = Revision ID, same as R5900
+./cpp/pcsx2/R5900.cpp:// being included into R5900.cpp.
+./cpp/pcsx2/R5900.cpp:                    disR5900Fasm(disasm, opcode, addr, false);
+./cpp/pcsx2/R5900.cpp:                    disR5900Fasm(disasm, opcode, addr, false);
+./cpp/pcsx2/R5900.cpp:                    disR5900Fasm(disasm, opcode, addr, false);
+./cpp/pcsx2/R5900.cpp:    // Globals are extern in iR5900.h, which is included.
+./cpp/pcsx2/ps2/Iop/IopHwRead.cpp:#include "R5900.h" // For cpuRegs/verification
+./cpp/pcsx2/ps2/Iop/IopHwRead.cpp:// Controlled by iR5900.cpp recEventTest
+./cpp/pcsx2/Counters.cpp:// [TEMP_DIAG] @@STUB_GUARD@@ clear counter — externed by iR5900.cpp for perf reporting
+./cpp/pcsx2/Counters.cpp:                    extern R5900cpu intCpu;
+./cpp/pcsx2/HwRead.cpp:using namespace R5900;
+./cpp/pcsx2/TestHarness.h:// テストコード (MIPS R5900 マシンコード) を eeMem に直接書き込み、
+./cpp/pcsx2/R5900Def.h:#ifndef PCSX2_R5900DEF_H
+./cpp/pcsx2/R5900Def.h:#define PCSX2_R5900DEF_H
+./cpp/pcsx2/R5900Def.h:    u32 pc;				// Program counter, when changing offset in struct, check iR5900-X.S to make sure offset is correct
+./cpp/pcsx2/R5900Def.h:#endif //PCSX2_R5900DEF_H
+./cpp/pcsx2/R5900.h:namespace R5900 {
+./cpp/pcsx2/R5900.h:// R5900 Instruction Macros
+./cpp/pcsx2/R5900.h://  R5900cpu
+./cpp/pcsx2/R5900.h:struct R5900cpu
+./cpp/pcsx2/R5900.h:extern R5900cpu *Cpu;
+./cpp/pcsx2/R5900.h:extern R5900cpu intCpu;
+./cpp/pcsx2/R5900.h:extern R5900cpu recCpu;
+./cpp/pcsx2/R5900.h:extern R5900cpu jitA64Cpu;
+./cpp/pcsx2/R5900.h:extern void _cpuEventTest_Shared();		// for internal use by the Dynarecs and Ints inside R5900:
+./cpp/pcsx2/arm64/cpuRegistersPack.h:#include "R5900Def.h"
+./cpp/pcsx2/arm64/VixlHelpers.h:// CPU(iR5900), PSX(iR3000A), FPU(iFPU, iFPUd)
+./cpp/pcsx2/arm64/RecStubs.cpp:#include "R5900.h"
+./cpp/pcsx2/arm64/RecStubs.cpp:R5900cpu recCpu;
+./cpp/pcsx2/arm64/RecStubs.cpp:        // Init R5900 (EE) - Partial
+./cpp/pcsx2/arm64/RecStubs.cpp:namespace R5900 {
+./cpp/pcsx2/VU0micro.cpp:using namespace R5900;
+./cpp/pcsx2/Common.h:#include "R5900.h"
+./cpp/pcsx2/VMManager.cpp:#include "R5900.h"
+./cpp/pcsx2/VMManager.cpp:// [P15] ELF postload callback — set by R5900.cpp, called at EntryPointCompilingOnCPUThread
+./cpp/pcsx2/VMManager.cpp:// Making GSDumpReplayer.h dependent on R5900.h is a no-no, since the GS uses it.
+./cpp/pcsx2/VMManager.cpp:extern R5900cpu GSDumpReplayerCpu;
+./cpp/pcsx2/VMManager.cpp:	R5900SymbolImporter.ShutdownWorkerThread();
+./cpp/pcsx2/VMManager.cpp:	R5900SymbolImporter.OnElfChanged(elfo.ReleaseData(), s_elf_path);
+./cpp/pcsx2/VMManager.cpp:	// [P15] EELOAD after completedに ELF ポストロード (R5900.cpp で定義)
+./cpp/pcsx2/VMManager.cpp:	R5900SymbolImporter.OnElfLoadedInMemory();
+./cpp/pcsx2/R3000AInterpreter.cpp:#include "R5900OpcodeTables.h"
+./cpp/pcsx2/R3000AInterpreter.cpp:	// Yeah, we use the R5900 opcode table for the R3000
+./cpp/pcsx2/R3000AInterpreter.cpp:	const R5900::OPCODE& opcode = R5900::GetInstruction(op);
+./cpp/pcsx2/Memory.cpp:#include "R5900.h" // For cpuRegs.pc access

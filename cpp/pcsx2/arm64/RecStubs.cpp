@@ -23,6 +23,28 @@ void vtlb_DynBackpatchLoadStore(uptr code_address, u32 code_size, u32 guest_pc, 
 // [iPSX2] Note: vu1Thread and CpuMicroVU0/CpuMicroVU1 are now
 // defined in x86/microVU.cpp (real microVU JIT implementation).
 
+// [iPSX2] Stub functions for jitA64Cpu
+static void jitA64Reserve() { }
+static void jitA64Shutdown() { }
+static void jitA64Reset() { }
+static void jitA64Step() { }
+static void jitA64Execute() { }
+static void jitA64SafeExitExecution() { }
+static void jitA64CancelInstruction() { }
+static void jitA64Clear(u32 Addr, u32 Size) { }
+
+// [iPSX2] Define jitA64Cpu as a stub until ARM64 JIT is fully implemented
+R5900cpu jitA64Cpu = {
+    jitA64Reserve,
+    jitA64Shutdown,
+    jitA64Reset,
+    jitA64Step,
+    jitA64Execute,
+    jitA64SafeExitExecution,
+    jitA64CancelInstruction,
+    jitA64Clear
+};
+
 #if !defined(iPSX2_REAL_REC)
 R3000Acpu psxRec;
 R5900cpu recCpu;

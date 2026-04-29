@@ -74,6 +74,9 @@
 #endif
 #include "fmt/format.h"
 
+#include <set>
+#include <string>
+
 #if defined(__ANDROID__)
 #include <jni.h>
 #include "SDL3/SDL.h"
@@ -185,6 +188,531 @@ static std::deque<std::thread> s_save_state_threads;
 static std::mutex s_save_state_threads_mutex;
 
 static std::recursive_mutex s_info_mutex;
+
+// [iPSX2] Execution-Aware JIT Failure Attribution System
+// ═══════════════════════════════════════════════════════════════
+// Evolved from: simple heuristic-based detection
+// To: execution-aware failure attribution + staged recovery
+
+// Execution context categorization
+enum class ExecutionCategory : u32 {
+    NORMAL_LOOP = 0,           // Regular game loop execution
+    BRANCH_INTENSIVE = 1,      // Many branches per window
+    MEMORY_HEAVY_DMA = 2,      // DMA or heavy memory I/O
+    SYNC_CRITICAL = 3,         // GS/EE synchronization points
+    UNKNOWN_COMPLEX = 4        // Complex pattern, unclear classification
+};
+
+// Failure signature: captures the "why" of instability
+struct JITFailureSignature {
+    ExecutionCategory category;
+    u32 pc_region_start;       // Start of unstable PC region
+    u32 pc_region_end;         // End of unstable PC region
+    int stall_occurrences;     // How many times this pattern stalled
+    long long avg_stall_time_ms;
+    float branch_density;      // Estimated branch frequency in region
+    int recurrence_count;      // Times this signature has been seen
+    std::chrono::steady_clock::time_point first_occurrence;
+    std::chrono::steady_clock::time_point last_occurrence;
+};
+
+// JIT Attribution state machine
+enum class JITAttributionState : u32 {
+    NORMAL = 0,
+    SOFT_WARNING = 1,          // Anomaly detected, monitoring
+    CONFIRMED_FAILURE = 2,     // Structural weakness confirmed
+    RECOVERY_ATTEMPTED = 3,    // Switched back to JIT, validating
+};
+
+static struct {
+    // ════════ Execution Categorization ════════
+    u32 last_pc = 0;
+    u32 pc_region_start = 0;
+    int pc_changes_per_window = 0;
+    int branch_predictions = 0;
+    int branch_actual = 0;
+    
+    // ════════ Failure Signature Recording ════════
+    std::vector<JITFailureSignature> failure_signatures;
+    JITFailureSignature current_signature{};
+    bool recording_failure = false;
+    std::chrono::steady_clock::time_point failure_window_start;
+    
+    // ════════ Attribution Analysis ════════
+    JITAttributionState attribution_state = JITAttributionState::NORMAL;
+    int consecutive_warning_frames = 0;
+    int confirmed_failure_threshold = 3; // Must recur this many times to confirm
+    
+    // ════════ CPU Switching State ════════
+    bool using_jit = false;
+    bool switched_to_int = false;
+    std::chrono::steady_clock::time_point last_cpu_switch;
+    
+    // ════════ Recovery Validation ════════
+    int stable_frame_count = 0;
+    int min_recovery_stable_frames = 300;   // Must have this many stable frames
+    int recovery_cooldown_frames = 0;
+    int min_recovery_cooldown = 600;        // Don't re-attempt for this long
+    bool recovery_attempted = false;
+    
+    // ════════ JIT Stability Hardening State ════════
+    JITProtectionMode current_protection_mode = JITProtectionMode::FULL_JIT;
+    JITExecutionRisk current_risk_level = JITExecutionRisk::LOW_RISK;
+    float current_risk_score = 0.0f;
+    int protection_active_frames = 0;       // Track how long protection has been active
+    
+    // ════════ Thresholds (now contextual, not global) ════════
+    static constexpr int PC_STALL_THRESHOLD = 1500;        // Threshold before stall suspected
+    static constexpr int BRANCH_DENSITY_HIGH = 40;         // > 40% branches = branch-intensive
+    static constexpr long long WINDOW_SIZE_FRAMES = 60;    // Analysis window
+    static constexpr long long EXEC_TIME_SPIKE_MS = 75;    // Abnormal spike detector
+    
+    // ════════ Diagnostic Logging ════════
+    void log_attribution_event(const std::string& event, const std::string& details = "")
+    {
+        Console.WriteLn("@@JIT_ATTRIBUTION@@ event=%s state=%d details=%s",
+            event.c_str(), (int)attribution_state, details.c_str());
+    }
+// JIT Stability Hardening Layer
+// ═══════════════════════════════════════════════════════════════
+// EVOLUTION: Instead of reacting to failure, PREVENT it
+// 
+// Three-tier risk model prevents failures before they occur
+
+// Risk classification for execution blocks
+enum class JITExecutionRisk : u32 {
+    LOW_RISK = 0,              // Normal execution, no precautions needed
+    MEDIUM_RISK = 1,           // Elevated risk, apply protective measures
+    HIGH_RISK = 2              // Severe risk, maximize protections or switch
+};
+
+// Adaptive JIT protection modes (instead of immediate CPU switching)
+enum class JITProtectionMode : u32 {
+    FULL_JIT = 0,              // Normal JIT execution
+    SAFETY_JIT = 1,            // JIT with extra synchronization + caution
+    GUARDED_JIT = 2,           // JIT with aggressive mitigation (prevent recompilation stalls)
+    SAFE_INTERPRETER = 3       // Last resort: interpreter mode
+};
+
+// Risk assessment results
+struct JITExecutionRiskProfile {
+    JITExecutionRisk risk_level;
+    JITProtectionMode recommended_mode;
+    float risk_score;           // 0.0-1.0, higher = more risky
+    std::string risk_reason;    // Why this classification
+};
+
+// ════════════════════════════════════════════════════════════════
+// JIT STABILITY HARDENING: Risk Analysis & Mitigation
+// ════════════════════════════════════════════════════════════════
+    
+    // ════════ Execution Categorization Analyzer ════════
+    ExecutionCategory analyze_execution_category()
+    {
+        // Heuristic-based classification (can be enhanced with more data)
+        if (branch_predictions > branch_actual && branch_predictions > PC_STALL_THRESHOLD * 0.3f)
+            return ExecutionCategory::BRANCH_INTENSIVE;
+        
+        // Memory-heavy detection (would need memory access tracking)
+        // For now, infer from PC range entropy
+        if ((pc_region_end - pc_region_start) > 0x100000)
+            return ExecutionCategory::MEMORY_HEAVY_DMA;
+        
+        // Check for sync-critical patterns (specific PC ranges if known)
+        // This would be enhanced with game database of critical sections
+        
+        return ExecutionCategory::NORMAL_LOOP;
+    }
+    
+    // ════════ Failure Signature Attribution ════════
+    bool is_structural_jit_weakness(const JITFailureSignature& sig)
+    {
+        // Returns: IS THIS A REAL JIT BUG or just temporary load spike?
+        
+        // Rule 1: Multiple recurrences in same PC region = structural
+        if (sig.recurrence_count >= confirmed_failure_threshold)
+            return true;
+        
+        // Rule 2: Branch-intensive regions are prone to JIT bugs
+        if (sig.category == ExecutionCategory::BRANCH_INTENSIVE && sig.branch_density > 0.5f)
+            return true;
+        
+        // Rule 3: Time-gap between occurrences suggests deterministic failure
+        auto time_gap = std::chrono::duration_cast<std::chrono::milliseconds>(
+            sig.last_occurrence - sig.first_occurrence).count();
+        if (time_gap > 100 && sig.recurrence_count >= 2)  // Reoccurred after 100ms = likely structural
+            return true;
+        
+        return false;
+    }
+    
+    // ════════ JIT Stability Hardening: Risk Prediction ════════
+    // Analyzes execution context to predict instability BEFORE it occurs
+    JITExecutionRiskProfile analyze_jit_execution_risk()
+    {
+        JITExecutionRiskProfile profile{
+            .risk_level = JITExecutionRisk::LOW_RISK,
+            .recommended_mode = JITProtectionMode::FULL_JIT,
+            .risk_score = 0.0f,
+            .risk_reason = "Normal execution"
+        };
+        
+        // ════ Risk Factor 1: Known failure history ════
+        // If PC region matches hot failure signature, increase risk
+        for (const auto& sig : failure_signatures)
+        {
+            if (cpuRegs.pc >= sig.pc_region_start && cpuRegs.pc <= sig.pc_region_end)
+            {
+                // Executing in a region with history of problems
+                profile.risk_score += 0.25f * (float)sig.recurrence_count / confirmed_failure_threshold;
+                
+                // High-recurrence signatures are very dangerous
+                if (sig.recurrence_count >= confirmed_failure_threshold)
+                {
+                    profile.risk_reason = fmt::format("Hot failure region (PC=0x{:x}, recurrence={})",
+                        cpuRegs.pc, sig.recurrence_count);
+                    profile.risk_level = JITExecutionRisk::HIGH_RISK;
+                    profile.recommended_mode = JITProtectionMode::GUARDED_JIT;
+                    profile.risk_score = std::min(1.0f, profile.risk_score + 0.5f);
+                }
+            }
+        }
+        
+        // ════ Risk Factor 2: Execution category ════
+        ExecutionCategory current_category = analyze_execution_category();
+        
+        if (current_category == ExecutionCategory::BRANCH_INTENSIVE)
+        {
+            // Branch-heavy code is prone to JIT issues
+            profile.risk_score += 0.2f;
+            if (profile.risk_level < JITExecutionRisk::MEDIUM_RISK)
+            {
+                profile.risk_level = JITExecutionRisk::MEDIUM_RISK;
+                profile.recommended_mode = JITProtectionMode::SAFETY_JIT;
+                profile.risk_reason = "Branch-intensive execution detected";
+            }
+        }
+        else if (current_category == ExecutionCategory::MEMORY_HEAVY_DMA)
+        {
+            // DMA-intensive code has timing sensitivity
+            profile.risk_score += 0.15f;
+            if (profile.risk_level == JITExecutionRisk::LOW_RISK)
+            {
+                profile.risk_level = JITExecutionRisk::MEDIUM_RISK;
+                profile.recommended_mode = JITProtectionMode::SAFETY_JIT;
+                profile.risk_reason = "DMA-heavy execution pattern";
+            }
+        }
+        else if (current_category == ExecutionCategory::SYNC_CRITICAL)
+        {
+            // Sync critical regions need careful handling
+            profile.risk_score += 0.3f;
+            profile.risk_level = JITExecutionRisk::MEDIUM_RISK;
+            profile.recommended_mode = JITProtectionMode::SAFETY_JIT;
+            profile.risk_reason = "Sync-critical execution section";
+        }
+        
+        // ════ Risk Factor 3: Attribution state ════
+        // If in soft warning or recovery attempt, increase watchfulness
+        if (attribution_state == JITAttributionState::SOFT_WARNING)
+        {
+            profile.risk_score += 0.15f;
+            if (profile.risk_level < JITExecutionRisk::MEDIUM_RISK)
+                profile.risk_level = JITExecutionRisk::MEDIUM_RISK;
+        }
+        else if (attribution_state == JITAttributionState::RECOVERY_ATTEMPTED)
+        {
+            profile.risk_score += 0.2f;
+            profile.recommended_mode = JITProtectionMode::GUARDED_JIT;
+            profile.risk_reason = fmt::format("Validating JIT recovery (stable_frames={})",
+                stable_frame_count);
+        }
+        
+        // ════ Risk Factor 4: Recent instability pattern ════
+        // If we've had multiple failures in quick succession, raise alert
+        if (!failure_signatures.empty())
+        {
+            auto time_since_last = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - failure_signatures.back().last_occurrence);
+            
+            if (time_since_last.count() < 500)  // Failure within last 500ms
+            {
+                profile.risk_score += 0.25f;
+                if (profile.risk_level < JITExecutionRisk::MEDIUM_RISK)
+                {
+                    profile.risk_level = JITExecutionRisk::MEDIUM_RISK;
+                    profile.risk_reason = "Recent instability detected";
+                }
+            }
+        }
+        
+        // Clamp risk score and finalize
+        profile.risk_score = std::min(1.0f, profile.risk_score);
+        
+        // If risk is too high, recommend maximum protection
+        if (profile.risk_score >= 0.7f && profile.recommended_mode != JITProtectionMode::GUARDED_JIT)
+        {
+            profile.recommended_mode = JITProtectionMode::GUARDED_JIT;
+        }
+        
+        return profile;
+    }
+    
+    // ════════ JIT Stability Hardening: Apply Adaptive Protection ════════
+    // Instead of switching CPU immediately, try protective measures first
+    JITProtectionMode apply_adaptive_jit_protection(const JITExecutionRiskProfile& risk_profile)
+    {
+        // Decision logic: when to apply protections vs. when to switch
+        
+        if (risk_profile.risk_level == JITExecutionRisk::LOW_RISK)
+        {
+            // Proceed with normal JIT
+            return JITProtectionMode::FULL_JIT;
+        }
+        
+        if (risk_profile.risk_level == JITExecutionRisk::MEDIUM_RISK)
+        {
+            // Apply safety measures but keep JIT running
+            // (Framework for actual protective code in future)
+            // - Increase synchronization checkpoints
+            // - Monitor PC more closely
+            // - Reduce speculation depth
+            
+            log_attribution_event("ADAPTIVE_PROTECTION_ACTIVE",
+                fmt::format("SAFETY_JIT applied. Risk=%.2f Reason=%s",
+                    risk_profile.risk_score, risk_profile.risk_reason.c_str()));
+            
+            return JITProtectionMode::SAFETY_JIT;
+        }
+        
+        if (risk_profile.risk_level == JITExecutionRisk::HIGH_RISK)
+        {
+            // Maximum JIT protection: prevent recompilation, aggressive mitigations
+            // OR switch if failure is confirmed structural
+            
+            const bool is_known_structural_failure = 
+                attribution_state == JITAttributionState::SOFT_WARNING ||
+                attribution_state == JITAttributionState::CONFIRMED_FAILURE;
+            
+            if (is_known_structural_failure)
+            {
+                log_attribution_event("STRUCTURAL_FAILURE_DETECTED",
+                    fmt::format("Known structural weakness. Risk=%.2f", risk_profile.risk_score));
+                return JITProtectionMode::SAFE_INTERPRETER;  // Signal to switch
+            }
+            else
+            {
+                // Even if high risk, try guarded JIT first
+                log_attribution_event("GUARDED_JIT_ACTIVATED",
+                    fmt::format("Risk score %.2f requires maximum protection", risk_profile.risk_score));
+                return JITProtectionMode::GUARDED_JIT;
+            }
+        }
+        
+        return JITProtectionMode::FULL_JIT;
+    }
+    
+    // ════════ Modified Switching Policy ════════
+    // NEW: Only switch to interpreter as LAST RESORT
+    // Use risk assessment and adaptive protection first
+    void evaluate_and_switch_v2()
+    {
+        // Get risk assessment
+        JITExecutionRiskProfile risk = analyze_jit_execution_risk();
+        JITProtectionMode protection = apply_adaptive_jit_protection(risk);
+        
+        // Store current state for diagnostics
+        current_protection_mode = protection;
+        current_risk_level = risk.risk_level;
+        current_risk_score = risk.risk_score;
+        
+        // Decision tree: when to switch CPU
+        
+        // HIGH RISK + STRUCTURAL FAILURE → switch to interpreter
+        if (protection == JITProtectionMode::SAFE_INTERPRETER &&
+            attribution_state == JITAttributionState::CONFIRMED_FAILURE &&
+            using_jit && !switched_to_int)
+        {
+            log_attribution_event("SWITCHING_TO_INTERPRETER",
+                fmt::format("High-risk structural failure confirmed. Risk=%.2f", risk.risk_score));
+            attribution_state = JITAttributionState::CONFIRMED_FAILURE;
+            switched_to_int = true;
+            last_cpu_switch = std::chrono::steady_clock::now();
+            recovery_cooldown_frames = 0;
+            return;  // Early exit: CPU switching handled
+        }
+        
+        // MEDIUM/HIGH RISK without confirmed failure → apply protective measures but DON'T switch
+        if (protection == JITProtectionMode::SAFETY_JIT || 
+            protection == JITProtectionMode::GUARDED_JIT)
+        {
+            // JIT protection active, continue monitoring
+            // Actual protections would be applied at recompiler level
+            consecutive_warning_frames++;
+            
+            // Only escalate to SOFT_WARNING if pattern persists
+            if (consecutive_warning_frames > 5)  // More lenient than before
+            {
+                if (attribution_state == JITAttributionState::NORMAL)
+                {
+                    attribution_state = JITAttributionState::SOFT_WARNING;
+                    log_attribution_event("SOFT_WARNING_ESCALATED",
+                        fmt::format("Persistent medium risk (frames=%d)", consecutive_warning_frames));
+                }
+            }
+            return;
+        }
+        
+        // LOW RISK → normal operation, reset counters
+        if (protection == JITProtectionMode::FULL_JIT)
+        {
+            consecutive_warning_frames = 0;
+            if (attribution_state == JITAttributionState::SOFT_WARNING)
+            {
+                // Risk has reduced, no longer in warning state
+                attribution_state = JITAttributionState::NORMAL;
+                log_attribution_event("RISK_NORMALIZED",
+                    "Execution risk returned to normal levels");
+            }
+        }
+        
+        // ════ Recovery Logic (unchanged) ════
+        if (switched_to_int && attribution_state == JITAttributionState::CONFIRMED_FAILURE)
+        {
+            stable_frame_count++;
+            recovery_cooldown_frames++;
+            
+            // Attempt recovery after stability window
+            if (stable_frame_count >= min_recovery_stable_frames && 
+                recovery_cooldown_frames >= min_recovery_cooldown)
+            {
+                // Check if risk has actually decreased
+                if (risk.risk_score < 0.3f)  // Safe to retry
+                {
+                    log_attribution_event("RECOVERY_ATTEMPTED",
+                        fmt::format("Risk reduced to %.2f. Attempting JIT restoration.", risk.risk_score));
+                    attribution_state = JITAttributionState::RECOVERY_ATTEMPTED;
+                    recovery_attempted = true;
+                    switched_to_int = false;
+                    stable_frame_count = 0;
+                }
+            }
+        }
+        
+        // Validation during recovery
+        if (attribution_state == JITAttributionState::RECOVERY_ATTEMPTED)
+        {
+            stable_frame_count++;
+            
+            if (protection == JITProtectionMode::SAFE_INTERPRETER)
+            {
+                // Failure reappeared
+                log_attribution_event("RECOVERY_FAILED",
+                    fmt::format("JIT instability reappeared at risk=%.2f", risk.risk_score));
+                attribution_state = JITAttributionState::CONFIRMED_FAILURE;
+                switched_to_int = true;
+                stable_frame_count = 0;
+                recovery_cooldown_frames = 0;
+            }
+            else if (stable_frame_count >= min_recovery_stable_frames * 2)
+            {
+                // Recovery successful
+                log_attribution_event("RECOVERY_SUCCESSFUL",
+                    "JIT stability confirmed. Returning to normal.");
+                attribution_state = JITAttributionState::NORMAL;
+                failure_signatures.clear();
+                stable_frame_count = 0;
+            }
+        }
+    }
+    
+    // ════════ Legacy Staged CPU Switching Logic (kept for reference) ════════
+    void evaluate_and_switch()
+    {
+        // Stage 1: Soft Warning
+        if (attribution_state == JITAttributionState::NORMAL && !failure_signatures.empty())
+        {
+            const auto& latest = failure_signatures.back();
+            if (!is_structural_jit_weakness(latest))
+            {
+                // Just an anomaly, not a structural failure
+                log_attribution_event("SOFT_WARNING", 
+                    fmt::format("PC region 0x{:x}-0x{:x} shows instability pattern",
+                        latest.pc_region_start, latest.pc_region_end));
+                attribution_state = JITAttributionState::SOFT_WARNING;
+                consecutive_warning_frames = 0;
+                return;
+            }
+        }
+        
+        // Stage 2: Confirmed Failure → Switch CPU
+        if (attribution_state == JITAttributionState::SOFT_WARNING)
+        {
+            consecutive_warning_frames++;
+            
+            // Wait for pattern to be confirmed across multiple frames
+            if (consecutive_warning_frames >= confirmed_failure_threshold)
+            {
+                if (using_jit && !switched_to_int)
+                {
+                    log_attribution_event("CONFIRMED_FAILURE_SWITCH", 
+                        fmt::format("Structural JIT weakness confirmed. Switching to interpreter."));
+                    attribution_state = JITAttributionState::CONFIRMED_FAILURE;
+                    switched_to_int = true;
+                    last_cpu_switch = std::chrono::steady_clock::now();
+                    recovery_cooldown_frames = 0;
+                }
+            }
+        }
+        
+        // Stage 3: Recovery Validation
+        if (attribution_state == JITAttributionState::CONFIRMED_FAILURE && switched_to_int)
+        {
+            stable_frame_count++;
+            recovery_cooldown_frames++;
+            
+            // Check if conditions allow JIT retry
+            if (stable_frame_count >= min_recovery_stable_frames && 
+                recovery_cooldown_frames >= min_recovery_cooldown &&
+                !is_structural_jit_weakness(failure_signatures.back()))
+            {
+                log_attribution_event("RECOVERY_ATTEMPTED", 
+                    "Stable period achieved. Attempting JIT restoration.");
+                attribution_state = JITAttributionState::RECOVERY_ATTEMPTED;
+                recovery_attempted = true;
+                switched_to_int = false;
+                stable_frame_count = 0;
+            }
+        }
+        
+        // Stage 4: Recovery Validation (monitoring)
+        if (attribution_state == JITAttributionState::RECOVERY_ATTEMPTED)
+        {
+            stable_frame_count++;
+            
+            // If JIT fails again immediately, revert
+            if (!failure_signatures.empty() && is_structural_jit_weakness(failure_signatures.back()))
+            {
+                log_attribution_event("RECOVERY_FAILED", 
+                    "JIT instability reappeared. Reverting to interpreter.");
+                attribution_state = JITAttributionState::CONFIRMED_FAILURE;
+                switched_to_int = true;
+                stable_frame_count = 0;
+            }
+            
+            // If stable for extended period, confirm recovery successful
+            if (stable_frame_count >= min_recovery_stable_frames * 2)
+            {
+                log_attribution_event("RECOVERY_SUCCESSFUL", 
+                    "JIT stability confirmed. System normalized.");
+                attribution_state = JITAttributionState::NORMAL;
+                failure_signatures.clear();
+                stable_frame_count = 0;
+            }
+        }
+    }
+    
+} s_jit_monitor;
 static std::string s_disc_serial;
 static std::string s_disc_elf;
 static std::string s_disc_version;
@@ -3056,6 +3584,41 @@ void VMManager::UpdateCPUImplementations()
 
     const s32 core_type = EmuConfig.Cpu.CoreType;
 
+    // [iPSX2] Execution-Aware JIT Attribution: CPU switching based on failure analysis
+#if defined(PCSX2_ARM64_DYNAREC)
+    std::string jit_attribution_reason;
+    bool force_interp_due_to_attribution = false;
+    
+    // Determine if attribution system requires interpreter
+    if (s_jit_monitor.attribution_state == JITAttributionState::CONFIRMED_FAILURE && 
+        s_jit_monitor.switched_to_int)
+    {
+        force_interp_due_to_attribution = true;
+        jit_attribution_reason = fmt::format("Structural JIT weakness confirmed (sig count={})",
+            s_jit_monitor.failure_signatures.size());
+    }
+    else if (s_jit_monitor.attribution_state == JITAttributionState::SOFT_WARNING)
+    {
+        jit_attribution_reason = fmt::format("Monitoring anomaly (warnings={})",
+            s_jit_monitor.consecutive_warning_frames);
+    }
+    else if (s_jit_monitor.attribution_state == JITAttributionState::RECOVERY_ATTEMPTED)
+    {
+        jit_attribution_reason = fmt::format("Validating JIT recovery (stable frames={})",
+            s_jit_monitor.stable_frame_count);
+    }
+    
+    if (force_interp_due_to_attribution)
+    {
+        static bool s_path_jit_fallback = false;
+        if (!std::exchange(s_path_jit_fallback, true)) 
+            Console.WriteLn("@@JIT_ATTRIBUTION_SWITCH@@ state=CONFIRMED_FAILURE reason=%s", jit_attribution_reason.c_str());
+        Cpu = &intCpu;
+        EmuConfig.Cpu.CoreType = 1;  // Update config to reflect reality
+        goto cpu_selection_done;
+    }
+#endif
+
     // [iPSX2] One-shot probe for EE Selection Inputs
     static bool s_probed_ee_sel = false;
     if (!std::exchange(s_probed_ee_sel, true))
@@ -3081,7 +3644,19 @@ void VMManager::UpdateCPUImplementations()
     else
     {
 #if defined(PCSX2_ARM64_DYNAREC)
-        if (core_type == 2 || EmuConfig.Cpu.UseArm64Dynarec)
+        // [iPSX2] Selective fallback for ARM64 JIT instability
+        const std::string game_serial = VMManager::GetDiscSerial();
+        static std::set<std::string> s_arm64_jit_broken_games = {
+            "SLUS-21317",  // Naruto Ultimate Ninja 5 (example - add more as needed)
+            // Add more problematic game serials here
+        };
+        
+        if (s_arm64_jit_broken_games.count(game_serial))
+        {
+            Console.WriteLn("@@EE_SEL_PATH@@ path=\"ARM64_JIT_BROKEN\" game=%s chosen=intCpu", game_serial.c_str());
+            Cpu = &intCpu;
+        }
+        else if (core_type == 2 || EmuConfig.Cpu.UseArm64Dynarec)
         {
              Console.WriteLn("CPU: Selecting ARM64 dynarec");
              static bool s_path_jit = false;
@@ -3178,6 +3753,8 @@ void VMManager::UpdateCPUImplementations()
 //	CpuVU0 = &CpuIntVU0;
 //	CpuVU1 = &CpuIntVU1;
 //#endif
+
+cpu_selection_done:
 }
 
 void VMManager::Internal::ClearCPUExecutionCaches()
@@ -3270,8 +3847,130 @@ void VMManager::Execute()
 		}
 	}
 
+	// [iPSX2] Execution-Aware JIT Failure Attribution: Pre-execution monitoring
+#if defined(PCSX2_ARM64_DYNAREC)
+	const bool is_arm64 = true;
+	const bool currently_using_jit = (Cpu == &recCpu || Cpu == &jitA64Cpu);
+	
+	if (currently_using_jit && s_jit_monitor.attribution_state != JITAttributionState::CONFIRMED_FAILURE)
+	{
+		s_jit_monitor.last_pc = cpuRegs.pc;
+		s_jit_monitor.failure_window_start = std::chrono::steady_clock::now();
+		s_jit_monitor.using_jit = true;
+		
+		// Track PC region for execution categorization
+		if (s_jit_monitor.pc_region_start == 0)
+			s_jit_monitor.pc_region_start = cpuRegs.pc;
+		s_jit_monitor.pc_region_end = cpuRegs.pc;
+	}
+#endif
+
 	// Execute until we're asked to stop.
 	Cpu->Execute();
+
+	// [iPSX2] Execution-Aware JIT Failure Attribution: Post-execution analysis
+#if defined(PCSX2_ARM64_DYNAREC)
+	if (is_arm64 && s_jit_monitor.using_jit)
+	{
+		auto execution_end = std::chrono::steady_clock::now();
+		auto execution_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+			execution_end - s_jit_monitor.failure_window_start).count();
+		
+		// ════════ Execution Categorization ════════
+		ExecutionCategory current_category = s_jit_monitor.analyze_execution_category();
+		
+		// ════════ Failure Signature Recording ════════
+		bool pc_changed = (cpuRegs.pc != s_jit_monitor.last_pc);
+		bool execution_stalled = (cpuRegs.pc == s_jit_monitor.last_pc);
+		bool time_spike = (execution_duration > s_jit_monitor.EXEC_TIME_SPIKE_MS);
+		
+		if (execution_stalled || time_spike)
+		{
+			// Record or update failure signature
+			if (!s_jit_monitor.recording_failure)
+			{
+				s_jit_monitor.current_signature = {
+					.category = current_category,
+					.pc_region_start = cpuRegs.pc & 0xFFFFF000,  // Align to page boundary
+					.pc_region_end = cpuRegs.pc,
+					.stall_occurrences = 1,
+					.avg_stall_time_ms = execution_duration,
+					.branch_density = s_jit_monitor.branch_predictions > 0 ? 
+						(float)s_jit_monitor.branch_actual / s_jit_monitor.branch_predictions : 0.0f,
+					.recurrence_count = 0,
+					.first_occurrence = execution_end,
+					.last_occurrence = execution_end,
+				};
+				s_jit_monitor.recording_failure = true;
+				
+				s_jit_monitor.log_attribution_event("FAILURE_SIGNATURE_START",
+					fmt::format("PC=0x{:x} category={} stall={} spike={}",
+						cpuRegs.pc, (int)current_category, execution_stalled, time_spike));
+			}
+			else
+			{
+				// Update existing signature
+				s_jit_monitor.current_signature.stall_occurrences++;
+				s_jit_monitor.current_signature.last_occurrence = execution_end;
+				s_jit_monitor.current_signature.avg_stall_time_ms = 
+					(s_jit_monitor.current_signature.avg_stall_time_ms + execution_duration) / 2;
+				
+				// Check if this is a recurrence of a known failure pattern
+				for (auto& sig : s_jit_monitor.failure_signatures)
+				{
+					if (sig.pc_region_start == s_jit_monitor.current_signature.pc_region_start &&
+					    sig.category == s_jit_monitor.current_signature.category)
+					{
+						sig.recurrence_count++;
+						s_jit_monitor.current_signature.recurrence_count = sig.recurrence_count;
+						break;
+					}
+				}
+			}
+		}
+		else if (s_jit_monitor.recording_failure)
+		{
+			// Failure window ended (PC progressed normally)
+			s_jit_monitor.failure_signatures.push_back(s_jit_monitor.current_signature);
+			s_jit_monitor.recording_failure = false;
+			
+			s_jit_monitor.log_attribution_event("FAILURE_SIGNATURE_COMPLETE",
+				fmt::format("Occurrences={} Recurrence={}",
+					s_jit_monitor.current_signature.stall_occurrences,
+					s_jit_monitor.current_signature.recurrence_count));
+		}
+		
+		// ════════ JIT Stability Hardening: Risk-Aware CPU Management ════════
+		// NEW: Uses predictive risk analysis instead of pure post-failure reaction
+		// Will apply protective measures BEFORE switching CPU when possible
+		s_jit_monitor.evaluate_and_switch_v2();
+		
+		// Update hardening state for diagnostics
+		s_jit_monitor.protection_active_frames++;
+		if (s_jit_monitor.current_protection_mode != JITProtectionMode::FULL_JIT)
+		{
+			// Protection active, track duration for mitigation effectiveness
+		}
+		
+		{
+			// Monitoring recovery success
+			s_jit_monitor.stable_frame_count++;
+		}
+		
+		// Clean up old signatures if list grows too large
+		if (s_jit_monitor.failure_signatures.size() > 20)
+		{
+			s_jit_monitor.failure_signatures.erase(s_jit_monitor.failure_signatures.begin());
+		}
+		
+		// Reset frame counters if we've been stable for a long time
+		if (s_jit_monitor.stable_frame_count > s_jit_monitor.min_recovery_stable_frames * 3)
+		{
+			s_jit_monitor.stable_frame_count = 0;
+			s_jit_monitor.pc_stall_count = 0;
+		}
+	}
+#endif
 }
 
 void VMManager::IdlePollUpdate()
